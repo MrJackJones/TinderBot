@@ -56,7 +56,7 @@ class LikesDaemon(Daemon):
                         msg = f'Error like {e}'
                         logging.error(msg)
                         continue
-                    sleep(20)
+                sleep(20)
 
 
 if __name__ == '__main__':

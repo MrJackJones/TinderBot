@@ -24,7 +24,7 @@ class ProxyListAdmin(admin.ModelAdmin):
 class BotAdmin(admin.ModelAdmin):
     list_display = ('profile', 'phone_number', 'token', 'bot_is_active', 'token_is_active', 'auth')
 
-    readonly_fields = ('token',)
+    readonly_fields = ('token', 'token_is_active')
     exclude = ('sms_code',)
 
     def auth(self, obj):

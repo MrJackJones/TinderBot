@@ -127,3 +127,28 @@ STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static'),)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+
+LOGGING = {
+    'version': 1,
+    'formatters': {
+        'verbose': {
+            'format': '%(levelname)s %(asctime)s %(module)s %(message)s',
+        },
+    },
+    'handlers': {
+        'views': {
+            'level': 'INFO',
+            'formatter': 'verbose',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'views.log'),
+        },
+    },
+    'loggers': {
+        'main.views': {
+            'handlers': ['views'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
+}
+

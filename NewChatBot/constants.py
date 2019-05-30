@@ -1,19 +1,25 @@
 import logging
 male = 0
-famale = 1
+female = 1
 
 ALL_GENDER = [
     (male, "Male"),
-    (famale, "Famale"),
+    (female, "Female"),
 ]
 
 BASE_HOST = 'http://localhost:8000/'
+
+REQUESTS_TIMEOUT = 5
 
 LOGGING_LEVEL = logging.WARNING
 LOGGING_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
 
 SMS_SERVICE_API_KEY = ''
 
+API_TOKEN_DIALOGFLOW = ''
+PROJECT_ID_DIALOGFLOW = ''
+
+GOOGLE_AUTH = {}
 
 COUNTRY_ALL = {
     ("random", "Random"),
@@ -75,7 +81,6 @@ COUNTRY_ALL = {
     ("chinese-china", "Chinese (China) - 中文 (中国)"),
     ("chinese-taiwan", "Chinese (Taiwan) - 中文 (台灣)"),
 }
-
 
 PHONE_COUNTRY = [
     (7, "Russia"),

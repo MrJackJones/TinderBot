@@ -8,62 +8,79 @@ from NewChatBot.constants import *
 from django.utils import timezone
 from .utils import get_proxy
 from time import sleep
+from django.conf import settings
+from os import walk
+import logging
+
+logger = logging.getLogger('views')
 
 
-@csrf_exempt
-def send_sms(request):
+def _get_phone_number(profile: Profile, proxies: dict, random_county: int):
+    print('Start Get Number')
+
+    get_number_url = f'https://onlinesim.ru/api/getNum.php?apikey={SMS_SERVICE_API_KEY}&service=tinder&country={random_county}'
+
     try:
-        data = json.loads(request.body.decode())
-        phone_number = data['phone_number']
-        bot_id = data['bot_id']
-        proxies = None
-    except:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_load_data',
-        }, status=400)
+        response = requests.get(get_number_url, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+    except Exception as e:
+        return
 
-    bot: Bot = Bot.objects.filter(id=bot_id).first()
+    print(response.text)
 
-    if not bot:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_bot_not_found',
-        }, status=400)
+    data = json.loads(response.text.encode('utf-8'))
 
-    if bot.proxy:
-        proxies = get_proxy(bot.proxy.proxy_list)
+    tzid = data['tzid']
 
-    url = f'https://api.gotinder.com/v2/auth/sms/send?auth_type=sms&locale=ru'
+    monitoring_number_url = f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=tinder'
 
-    data = {
-        "phone_number": phone_number
-    }
-    response = requests.post(url, data=data, proxies=proxies)
+    try:
+        response = requests.get(monitoring_number_url, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+    except Exception as e:
+        return
 
-    if response.status_code != 200:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_send_sms',
-        }, status=400)
+    print(response.text)
 
-    return JsonResponse({
-            'status': 'ok',
-        }, status=200)
+    data = json.loads(response.text.encode('utf-8'))
+
+    for i in data:
+        if i['tzid'] == tzid and i.get('number') and not PhoneBlackList.objects.filter(
+                phone_number=i['number']).exists():
+            phone_number = i['number']
+            tzid = i['tzid']
+
+            PhoneBlackList.objects.create(phone_number=phone_number)
+
+            return phone_number, tzid
+
+    return
+
+
+def _get_otp_code(tzid: int, proxies: dict):
+    print('Start Get OTP')
+    try:
+        response = requests.get(
+            f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=tinder',
+            proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT
+        )
+    except Exception as e:
+        return
+
+    print(response.text)
+
+    data = json.loads(response.text.encode('utf-8'))
+    for i in data:
+        if i['tzid'] == tzid:
+            if i.get('msg'):
+                otp_code = i['msg']
+                return otp_code
+    return
 
 
 @csrf_exempt
 def get_token(request):
     try:
         data = json.loads(request.body.decode())
-        phone_number = None
-        otp_code = None
-        if data.get('phone_number'):
-            phone_number = data['phone_number']
-        if data.get('otp_code'):
-            otp_code = data['otp_code']
         bot_id = data['bot_id']
-        proxies= None
     except:
         return JsonResponse({
             'status': 'errors',
@@ -72,234 +89,272 @@ def get_token(request):
 
     bot: Bot = Bot.objects.filter(id=bot_id).first()
 
-    print(bot)
-
     if not bot:
         return JsonResponse({
             'status': 'errors',
             'data': 'error_bot_not_found',
         }, status=400)
 
-    # Send confirmation SMS
+    profiles = Profile.objects.filter(bot=bot)
 
-    if bot.proxy:
-        proxies = get_proxy(bot.proxy.proxy_list)
+    random_county = bot.phone_country
 
-    if not bot.manual:
-        response = requests.get(f'https://onlinesim.ru/api/getNum.php?apikey={SMS_SERVICE_API_KEY}&service=other&country={bot.phone_country}', proxies=proxies)
-        print(response.text)
+    for profile in profiles:
+        if profile.token_is_active:
+            continue
 
-        if response.status_code != 200:
-            return JsonResponse({
-                'status': 'errors',
-                'data': 'error_get_number',
-            }, status=400)
+        proxies = None
+        f = None
+        otp_code = None
+        tzid = None
 
-        data = json.loads(response.text.encode('utf-8'))
-        tzid = data['tzid']
+        if bot.proxy:
+            proxies = get_proxy(bot.proxy.proxy_list)
 
-        response = requests.get(f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=other', proxies=proxies)
-        print(response.text)
+        phone_number = profile.phone_number
 
-        data = json.loads(response.text.encode('utf-8'))
+        print(f'Start profile: {profile.pk} proxy: {proxies}')
 
-        for i in data:
-            if i['tzid'] == tzid:
-                phone_number = i['number']
+        if not phone_number:
+            while not phone_number:
+                phone_number, tzid = _get_phone_number(profile, proxies, random_county)
 
         data = {
             "phone_number": phone_number
         }
 
         url = f'https://api.gotinder.com/v2/auth/sms/send?auth_type=sms&locale=ru'
-
-        response = requests.post(url, data=data, proxies=proxies)
+        try:
+            response = requests.post(url, data=data, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+        except Exception as e:
+            continue
         print(response.text)
 
         if response.status_code != 200:
-            return JsonResponse({
-                'status': 'errors',
-                'data': 'error_send_sms',
-            }, status=400)
+            msg = f'error_send_sms for profile: {profile.pk}'
+            print(msg)
+            logger.error(msg)
+            continue
 
-        response = requests.get(f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=other', proxies=proxies)
-        print(response.text)
-
-        data = json.loads(response.text.encode('utf-8'))
         repeat = 0
-        while not otp_code or repeat == 20:
-            for i in data:
-                if i['tzid'] == tzid:
-                    if i.get('msg'):
-                        otp_code = i['msg']
-                    else:
-                        sleep(10)
-                        response = requests.get(
-                            f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=other',
-                            proxies=proxies)
-                        print(response.text)
-                        data = json.loads(response.text.encode('utf-8'))
-                        repeat += 1
+        while not otp_code and repeat < 5:
+            sleep(20)
+            otp_code = _get_otp_code(tzid, proxies)
+            repeat += 1
 
-    url = f'https://api.gotinder.com/v2/auth/sms/validate?auth_type=sms&locale=ru'
+        url = f'https://api.gotinder.com/v2/auth/sms/validate?auth_type=sms&locale=ru'
 
-    if not phone_number and not otp_code:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_not_number_or_otp_code',
-        }, status=400)
+        if not phone_number and not otp_code:
+            msg = f'error_not_number_or_otp_code for profile: {profile.pk}'
+            print(msg)
+            logger.error(msg)
+            continue
 
-    data = {
-        "otp_code": otp_code,
-        "phone_number": phone_number,
-        "is_update": False
-    }
-
-    response = requests.post(url, data=data, proxies=proxies)
-
-    if response.status_code != 200:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_confirmation_sms',
-        }, status=400)
-
-    # Send refresh token
-
-    response_data = json.loads(response.text)
-
-    refresh_token = response_data['data']['refresh_token']
-
-    url = f'https://api.gotinder.com/v2/auth/login/sms?locale=ru'
-
-    data = json.dumps({
-        "refresh_token": refresh_token,
-        "phone_number": phone_number
-    })
-
-    response = requests.post(url, data=data, proxies=proxies)
-
-    if response.status_code != 200:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_send_refresh_token',
-        }, status=400)
-
-    api_data = json.loads(response.text)
-
-    if api_data['data']['is_new_user']:
-        url_photo = f'https://api.gotinder.com/v2/onboarding/photo?locale=ru&requested=allow_email_marketing&requested=birth_date&requested=consents&requested=email&requested=gender&requested=name&requested=photos'
-        url_profile = f'https://api.gotinder.com/v2/onboarding/fields?locale=ru&requested=allow_email_marketing&requested=birth_date&requested=consents&requested=email&requested=gender&requested=name&requested=photo'
-        url_complite = f'https://api.gotinder.com/v2/onboarding/complete?locale=ru&requested=allow_email_marketing&requested=birth_date&requested=consents&requested=email&requested=gender&requested=name&requested=photos'
-
-        onboarding_token = api_data['data']['onboarding_token']
-        headers = {
-            'token': onboarding_token,
+        data = {
+            "otp_code": otp_code,
+            "phone_number": phone_number,
+            "is_update": False
         }
+        try:
+            response = requests.post(url, data=data, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+        except Exception as e:
+            continue
 
-        current_path = os.path.dirname(os.path.realpath(__file__))
-        files = {'photo': ('blob', open(f'{current_path}/../media/{bot.profile.photo}', 'rb'), 'image/jpeg')}
+        if response.status_code != 200:
+            msg = f'error_confirmation_sms for profile: {profile.pk}'
+            print(msg)
+            logger.error(msg)
+            continue
 
-        photo_request = requests.post(url_photo, files=files, headers=headers, proxies=proxies)
+        response_data = json.loads(response.text)
 
-        if photo_request.status_code != 200:
-            return JsonResponse({
-                'status': 'errors',
-                'data': 'error_photo_request',
-            }, status=400)
+        refresh_token = response_data['data']['refresh_token']
 
-        headers = {
-            'token': onboarding_token,
-            'Content-Type': 'application/json'
-        }
+        url = f'https://api.gotinder.com/v2/auth/login/sms?locale=ru'
 
-        profile_data = json.dumps({
-            "fields": [
-                {
-                    "name": "birth_date",
-                    "data": timezone.localtime(bot.profile.birth_date).strftime('%Y-%m-%d')
-                },
-                {
-                    "name": "email",
-                    "data": bot.profile.email
-                },
-                {
-                    "name": "gender",
-                    "data": bot.profile.gender
-                },
-                {
-                    "name": "show_gender_on_profile",
-                    "data": bot.profile.show_gender_on_profile
-                },
-                {
-                    "name": "name",
-                    "data": bot.profile.name
-                 }
-            ]
+        data = json.dumps({
+            "refresh_token": refresh_token,
+            "phone_number": phone_number
         })
 
-        profile_request = requests.post(url_profile, data=profile_data, headers=headers, proxies=proxies)
+        try:
+            response = requests.post(url, data=data, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+        except Exception as e:
+            continue
 
-        if profile_request.status_code != 200:
-            return JsonResponse({
-                'status': 'errors',
-                'data': 'error_profile_request',
-            }, status=400)
+        if response.status_code != 200:
+            msg = f'error_send_refresh_token for profile: {profile.pk}'
+            print(msg)
+            logger.error(msg)
+            continue
 
-        complite_data = {}
+        api_data = json.loads(response.text)
 
-        complite_request = requests.post(url_complite, data=complite_data, headers=headers, proxies=proxies)
+        if api_data['data']['is_new_user']:
+            url_photo = f'https://api.gotinder.com/v2/onboarding/photo?locale=ru&requested=allow_email_marketing&requested=birth_date&requested=consents&requested=email&requested=gender&requested=name&requested=photos'
+            url_profile = f'https://api.gotinder.com/v2/onboarding/fields?locale=ru&requested=allow_email_marketing&requested=birth_date&requested=consents&requested=email&requested=gender&requested=name&requested=photo'
+            url_complite = f'https://api.gotinder.com/v2/onboarding/complete?locale=ru&requested=allow_email_marketing&requested=birth_date&requested=consents&requested=email&requested=gender&requested=name&requested=photos'
 
-        if complite_request.status_code != 200:
-            return JsonResponse({
-                'status': 'errors',
-                'data': 'error_complite_request',
-            }, status=400)
+            onboarding_token = api_data['data']['onboarding_token']
+            headers = {
+                'token': onboarding_token,
+            }
 
-    response = requests.post(url, data=data, proxies=proxies)
+            f = []
 
-    if response.status_code != 200:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_get_api_token',
-        }, status=400)
+            for (dirpath, dirnames, filenames) in walk(profile.photo):
+                f.extend(filenames)
+                break
 
-    api_data = json.loads(response.text)
+            photo = choice(f)
+            files = {'photo': ('blob', open(f'{profile.photo}/{photo}', 'rb'), 'image/jpeg')}
 
-    try:
-        auth_complite = api_data['data']['api_token']
-        bot.token = auth_complite
-        bot.token_is_active = True
-        bot.save()
-    except:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_save_api_token',
-        }, status=400)
+            try:
+                photo_request = requests.post(url_photo, files=files,
+                                              headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+            except Exception as e:
+                continue
 
-    url = f'https://api.gotinder.com/v2/meta?locale=ru'
+            print(photo_request.text)
 
-    data = json.dumps({
-        "lat": bot.profile.latitude,
-        "lon": bot.profile.longitude,
-        "force_fetch_resources": True
-    })
+            if photo_request.status_code != 200:
+                msg = f'error_photo_request for profile: {profile.pk}'
+                print(msg)
+                logger.error(msg)
+                continue
 
-    print(data)
+            f.remove(photo)
 
-    headers = {
-        'x-auth-token': auth_complite,
-        'platform': 'web'
-    }
+            headers = {
+                'token': onboarding_token,
+                'Content-Type': 'application/json'
+            }
 
-    response = requests.post(url, data=data, headers=headers, proxies=proxies)
+            profile_data = json.dumps({
+                "fields": [
+                    {
+                        "name": "birth_date",
+                        "data": timezone.localtime(profile.birth_date).strftime('%Y-%m-%d')
+                    },
+                    {
+                        "name": "email",
+                        "data": profile.email
+                    },
+                    {
+                        "name": "gender",
+                        "data": profile.gender
+                    },
+                    {
+                        "name": "show_gender_on_profile",
+                        "data": profile.show_gender_on_profile
+                    },
+                    {
+                        "name": "name",
+                        "data": profile.name
+                     }
+                ]
+            })
 
-    print(response.text)
+            try:
+                profile_request = requests.post(url_profile, data=profile_data,
+                                                headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+            except Exception as e:
+                continue
 
-    if response.status_code != 200:
-        return JsonResponse({
-            'status': 'errors',
-            'data': 'error_seet_geo',
-        }, status=400)
+            print(profile_request.text)
+
+            if profile_request.status_code != 200:
+                msg = f'error_profile_request for profile: {profile.pk}'
+                print(msg)
+                logger.error(msg)
+                continue
+
+            complite_data = {}
+
+            try:
+                complite_request = requests.post(url_complite, data=complite_data,
+                                                 headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+            except Exception as e:
+                continue
+
+            print(complite_request.text)
+
+            if complite_request.status_code != 200:
+                msg = f'error_complite_request for profile: {profile.pk}'
+                print(msg)
+                logger.error(msg)
+                continue
+        try:
+            response = requests.post(url, data=data, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+        except Exception as e:
+            continue
+
+        if response.status_code != 200:
+            msg = f'error_get_api_token for profile: {profile.pk}'
+            print(msg)
+            logger.error(msg)
+            continue
+
+        api_data = json.loads(response.text)
+
+        try:
+            auth_complite = api_data['data']['api_token']
+            profile.token = auth_complite
+            profile.token_is_active = True
+            profile.save()
+        except:
+            msg = f'error_save_api_token for profile: {profile.pk}'
+            print(msg)
+            logger.error(msg)
+            continue
+
+        url = f'https://api.gotinder.com/v2/meta?locale=ru'
+
+        data = json.dumps({
+            "lat": profile.latitude,
+            "lon": profile.longitude,
+            "force_fetch_resources": True
+        })
+
+        if auth_complite:
+            headers = {
+                'x-auth-token': auth_complite,
+                'platform': 'web'
+            }
+
+            try:
+                response = requests.post(url, data=data,
+                                         headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+            except Exception as e:
+                continue
+
+            print(response.text)
+
+            if response.status_code != 200:
+                msg = f'error_seet_geo for profile: {profile.pk}'
+                print(msg)
+                logger.error(msg)
+                continue
+
+            if f:
+                f.remove(photo)
+
+            while f:
+                photo = choice(f)
+                files = {'photo': ('blob', open(f'{profile.photo}/{photo}', 'rb'), 'image/jpeg')}
+
+                url_photo = 'https://api.gotinder.com/image?client_photo_id=%7BphotoId%7D?client_photo_id=ProfilePhoto0000000000000&locale=ru'
+                try:
+                    requests.post(url_photo, files=files,
+                                  headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+                except Exception as e:
+                    continue
+                f.remove(photo)
+
+        print('WAIT!')
+        sleep(20)
+
+    print('Finish')
 
     return JsonResponse({
             'status': 'ok',

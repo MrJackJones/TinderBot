@@ -1,31 +1,12 @@
 <div class="support-ticket support-ticket-{{ obj.pk }} {% if obj.closed %}closed{% endif %} {% if obj.unread %}unread{% endif %}"
      data-id="{{ obj.pk }}">
-    {% if not obj.phone_number and obj.manual %}
-        <H3>Phone number not specified</H3>
-    {% endif %}
     {% if not obj.bot_is_active %}
         <H3>Bot not active</H3>
     {% endif %}
-
-    {% if obj.phone_number and obj.bot_is_active and not obj.token_is_active and obj.manual %}
-         <div class="phone_number_form">
-            <input type="hidden" name="phone_number" class="phone_number" value="{{ obj.phone_number }}">
-            <input type="hidden" name="bot_id" class="bot_id" value="{{ obj.id }}">
-            <input type="button" class="send_sms" data-id="{{ obj.pk }}" value="Send SMS">
-        </div>
-        <div class="get_token_form">
-            <input type="hidden" name="phone_number" class="phone_number" value="{{ obj.phone_number }}">
-            <input type="hidden" name="bot_id" class="bot_id" value="{{ obj.id }}">
-             <input type="text" name="sms_code" class="sms_code" value="" placeholder="Enter sms code">
-            <br>
-            <br>
-            <input type="button" class="get_token" data-id="{{ obj.pk }}" value="Get Token">
-        </div>
-    {% endif %}
-    {% if obj.bot_is_active and not obj.token_is_active and not obj.manual %}
+    {% if obj.bot_is_active%}
         <div class="get_token_auto">
             <input type="hidden" name="bot_id" class="bot_id" value="{{ obj.id }}">
-            <input type="button" class="get_token_auto" data-id="{{ obj.pk }}" value="Get Auto Token">
+            <input type="button" class="get_token_auto" data-id="{{ obj.pk }}" value="Activate Bots">
         </div>
     {% endif %}
 </div>

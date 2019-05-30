@@ -1,25 +1,51 @@
 import os
-from django.views.decorators.csrf import csrf_exempt
-import json
-from django.http import JsonResponse
 import requests
-from main.models import *
-from NewChatBot.constants import *
-from django.utils import timezone
 import random
-
-current_path = os.path.dirname(os.path.realpath(__file__))
+from NewChatBot.constants import *
+from django.conf import settings
 
 
 def get_proxy(proxy_list):
+    media_root = settings.MEDIA_ROOT
+
     try:
-        with open(f'{current_path}/../media/{proxy_list}') as f:
+        with open(f'{media_root}/{proxy_list}') as f:
             my_lines = list(f.read().splitlines())
             proxy = random.choice(my_lines)
 
-            return {
+            proxies = {
                 'http': f'http://{proxy}',
                 'https': f'https://{proxy}',
             }
+
+            checked_proxy = False
+
+            while not checked_proxy:
+
+                print(f'Start Check Proxy: {proxies}')
+
+                check_proxy_url = f'https://api.exchangeratesapi.io/latest'
+                try:
+                    response = requests.get(check_proxy_url, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+                except Exception as e:
+                    proxy = random.choice(my_lines)
+                    proxies = {
+                        'http': f'http://{proxy}',
+                        'https': f'https://{proxy}',
+                    }
+                    continue
+
+                if response.status_code != 200:
+                    proxy = random.choice(my_lines)
+                    proxies = {
+                        'http': f'http://{proxy}',
+                        'https': f'https://{proxy}',
+                    }
+                    continue
+
+                checked_proxy = True
+
+            return proxies
+
     except:
         return

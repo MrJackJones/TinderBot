@@ -25,16 +25,25 @@ class LikesDaemon(Daemon):
     def run(self):
         while True:
             proxies = None
-            bots = Bot.objects.filter(bot_is_active=True)
+            profiles = Profile.objects.filter(bot__bot_is_active=True, token_is_active=True, likes_limit=False)
 
-            for bot in bots:
-                if bot.proxy:
-                    proxies = get_proxy(bot.proxy.proxy_list)
+            if not profiles:
+                print('No active profile')
+                exit()
 
-                print(proxies)
-                headers = {'x-auth-token': bot.token}
-                response = requests.get('https://api.gotinder.com/recs/core?locale=ru',
-                                        headers=headers, proxies=proxies, verify=False)
+            for profile in profiles:
+                if profile.bot.proxy:
+                    proxies = get_proxy(profile.bot.proxy.proxy_list)
+                headers = {'x-auth-token': profile.token}
+                try:
+                    response = requests.get('https://api.gotinder.com/recs/core?locale=ru',
+                                            headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+                except Exception as e:
+                    msg = f'Error like {e}'
+                    print(msg)
+                    logging.error(msg)
+                    continue
+
                 data = json.loads(response.text.encode('utf-8'))
                 for count in range(len(data['results'])):
                     try:
@@ -43,19 +52,28 @@ class LikesDaemon(Daemon):
                         photo = data['results'][count]['photos'][0]['url']
 
                         if not LikesProfile.objects.filter(profile_id=id).first():
-                            likes_profile = LikesProfile(name=name, profile_id=id, photo=photo)
-                            likes_profile.save()
+                            response = requests.get(f'https://api.gotinder.com/like/{id}?fast_match=1&locale=ru',
+                                         headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
 
-                            requests.get(f'https://api.gotinder.com/like/{id}?fast_match=1&locale=ru',
-                                         headers=headers, proxies=proxies, verify=False)
+                            if response.status_code == 200:
+                                likes_profile = LikesProfile(likes_profile=profile, name=name, profile_id=id, photo=photo)
+                                likes_profile.save()
 
-                            text = f'You like: {name}, ID: {id}, Photo: {photo}'
-                            print(text)
+                                text = f'Profile {profile.pk}: {profile.name} like: {name}, ID: {id}, Photo: {photo}'
+                                print(text)
+                                continue
+
+                            profile.likes_limit = True
+                            profile.save()
+                            print(f'Profile {profile.pk} is likes limit')
+                            break
 
                     except Exception as e:
                         msg = f'Error like {e}'
+                        print(msg)
                         logging.error(msg)
                         continue
+
                 sleep(20)
 
 

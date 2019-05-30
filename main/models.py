@@ -1,23 +1,16 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import User
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from django.core.validators import RegexValidator
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 from NewChatBot.constants import *
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save
 import requests
 import json
-from datetime import datetime
-import pytz
-import ssl
-from django.core.files.uploadedfile import InMemoryUploadedFile
-import sys
-from urllib.request import urlopen
-from tempfile import NamedTemporaryFile
 from NewChatBot.constants import *
+from random import randint, choice
+from django.conf import settings
+from main.utils import get_proxy
 
 
 class ProxyList(models.Model):
@@ -28,47 +21,61 @@ class ProxyList(models.Model):
         return self.country
 
 
-class Profile(models.Model):
+class PhoneBlackList(models.Model):
+    phone_number = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.phone_number
+
+
+def bio_path(instance, filename):
+    return f'profile/bio_{randint(1, 9999999)}/{filename}'
+
+
+class Bot(models.Model):
+    profile_count = models.IntegerField(default=1, blank=True, null=True)
     gender = models.PositiveSmallIntegerField('Gender', choices=ALL_GENDER, default=male)
+    age_from = models.IntegerField(default=18, blank=True, null=True)
+    age_to = models.IntegerField(default=18, blank=True, null=True)
     country = models.CharField('Country', choices=COUNTRY_ALL, default='random', max_length=255)
-    manual = models.BooleanField(default=False)
+    phone_country = models.PositiveSmallIntegerField('Phone Country', choices=PHONE_COUNTRY, default=7, blank=True, null=True)
+    proxy = models.ForeignKey(ProxyList, related_name='proxy', on_delete=models.CASCADE, blank=True, null=True)
+    biography = models.FileField(upload_to=bio_path)
+    photo_folder_list = models.CharField(max_length=1000)
+    unique_names = models.BooleanField(default=False)
+    bot_is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.pk}"
+
+
+class Profile(models.Model):
+    bot = models.ForeignKey(Bot, related_name='bot', on_delete=models.CASCADE)
     name = models.CharField(max_length=255, blank=True, null=True)
+    gender = models.PositiveSmallIntegerField('Gender', choices=ALL_GENDER, default=male)
     email = models.EmailField(blank=True, null=True)
     latitude = models.FloatField(blank=True, null=True)
     longitude = models.FloatField(blank=True, null=True)
     birth_date = models.DateTimeField(blank=True, null=True)
-    photo = models.ImageField(upload_to='images', blank=True, null=True)
+    photo = models.CharField(max_length=1000, blank=True, null=True)
     show_gender_on_profile = models.BooleanField(default=False)
-
-    def photo_tag(self):
-        return mark_safe(f'<img src="{BASE_HOST}media/{self.photo}" width="150" height="170"  />')
-
-    photo_tag.short_description = 'Image'
-    photo_tag.allow_tags = True
+    biography = models.CharField(max_length=255, blank=True, null=True)
+    phone_number = models.CharField(max_length=17, blank=True, null=True)
+    token = models.CharField(max_length=36, blank=True, null=True)
+    token_is_active = models.BooleanField(default=False)
+    likes_limit = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.name} - {timezone.localtime(self.birth_date).strftime('%Y-%m-%d')} - {self.get_gender_display()}"
 
 
-class Bot(models.Model):
-    profile = models.ForeignKey(Profile, related_name='Profile', on_delete=models.CASCADE)
-    proxy = models.ForeignKey(ProxyList, related_name='proxy', on_delete=models.CASCADE, blank=True, null=True)
-    phone_regex = RegexValidator(regex=r'^\+?1?\d{9,15}$',
-                                 message="Phone number must be entered in the format: '+79999999999'. Up to 15 digits allowed.")
-    sms_regex = RegexValidator(regex=r'^\+?1?\d{6,6}$')
-    manual = models.BooleanField(default=False)
-    phone_number = models.CharField(validators=[phone_regex], max_length=17, blank=True, null=True)
-    phone_country = models.PositiveSmallIntegerField('Phone Country', choices=PHONE_COUNTRY, default=7)
-    sms_code = models.CharField(validators=[sms_regex], max_length=6, blank=True, null=True)
-    token = models.CharField(max_length=36, blank=True, null=True)
-    bot_is_active = models.BooleanField(default=False)
-    token_is_active = models.BooleanField(default=False)
-
-
 class LikesProfile(models.Model):
+    likes_profile = models.ForeignKey(Profile, related_name='Bot', on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
     profile_id = models.CharField(max_length=255)
     photo = models.CharField(max_length=255)
+    matches = models.BooleanField(default=False)
+    messaging = models.BooleanField(default=False)
 
     def photo_tag(self):
         return mark_safe(f'<img src="{self.photo}" width="150" height="170"  />')
@@ -80,34 +87,79 @@ class LikesProfile(models.Model):
         return self.name
 
 
-def profile_pre_save(sender, **kwargs):
-    profile = kwargs.get('instance')
-    if not profile.pk and not profile.manual:
-        response = requests.get(f'https://api.namefake.com/{profile.country}/{profile.get_gender_display().lower()}/', verify=False)
-        data = json.loads(response.text.encode('utf-8'))
+def bot_post_save(sender, instance, created, **kwargs):
+    media_root = settings.MEDIA_ROOT
 
-        profile.name = data['name'].split(' ')[0]
-        profile.email = f"{data['email_u']}@{data['email_d']}"
-        profile.latitude = data['latitude']
-        profile.longitude = data['longitude']
-        profile.birth_date = pytz.timezone('US/Eastern').localize(datetime.strptime(data['birth_data'], "%Y-%m-%d"), is_dst=None)
+    if created:
+        proxies = None
+        biography = instance.biography
+        photo_list = instance.photo_folder_list.split(',')
 
-        response = requests.get(f'https://randomuser.me/api/?gender={profile.get_gender_display().lower()}', verify=False)
+        with open(f'{media_root}/{biography}') as f:
+            biography_list = list(f.read().splitlines())
 
-        data = json.loads(response.text.encode('utf-8'))
+        for create_profile in range(instance.profile_count):
 
-        photo = data['results'][0]['picture']['large']
+            if instance.proxy:
+                proxies = get_proxy(instance.proxy.proxy_list)
 
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+            unique_names = instance.unique_names
+            profile: Profile = Profile(bot=instance)
+            try:
+                response = requests.get(
+                    f'https://api.namefake.com/{instance.country}/{instance.get_gender_display().lower()}/',
+                    timeout=REQUESTS_TIMEOUT, proxies=proxies, verify=False)
+            except Exception as e:
+                continue
 
-        img_temp = NamedTemporaryFile(delete=True)
-        img_temp.write(urlopen(photo, context=ctx).read())
-        img_temp.flush()
+            print(response.text)
+            data = json.loads(response.text.encode('utf-8'))
 
-        profile.photo = InMemoryUploadedFile(img_temp,'ImageField', "profile_images.jpg", 'image/jpeg', sys.getsizeof(img_temp), None)
+            name = data['name'].split(' ')[0]
+            email = f"{data['email_u']}@{data['email_d']}"
+            latitude = data['latitude']
+            longitude = data['longitude']
+
+            birth_date = timezone.datetime.now()-timezone.timedelta(days=randint(instance.age_from, instance.age_to)*365)
+
+            while unique_names:
+                if Profile.objects.filter(name=name).exists() \
+                        or name in ['Mr', 'Mrs', 'Miss', 'Ms', 'Mx', 'Sir', 'dr', 'Dr', 'Prof.']:
+                    try:
+                        response = requests.get(
+                            f'https://api.namefake.com/{instance.country}/{instance.get_gender_display().lower()}/',
+                            proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+                    except Exception as e:
+                        continue
+
+                    data = json.loads(response.text.encode('utf-8'))
+                else:
+                    name = data['name'].split(' ')[0]
+                    email = f"{data['email_u']}@{data['email_d']}"
+                    latitude = data['latitude']
+                    longitude = data['longitude']
+                    birth_date = timezone.datetime.now() - timezone.timedelta(
+                        days=randint(instance.age_from, instance.age_to) * 365)
+                    unique_names = False
+
+            profile.name = name
+            profile.email = email
+            profile.gender = instance.gender
+            profile.latitude = latitude
+            profile.longitude = longitude
+            profile.birth_date = birth_date
+
+            if biography_list:
+                bio = choice(biography_list)
+                biography_list.remove(bio)
+                profile.biography = bio
+
+            photo = choice(photo_list)
+            profile.photo = f'{media_root}/images/{photo}'
+
+            profile.save()
+
+            print('Done')
 
 
-
-pre_save.connect(profile_pre_save, sender=Profile)
+post_save.connect(bot_post_save, sender=Bot)

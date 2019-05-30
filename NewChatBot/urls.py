@@ -23,7 +23,6 @@ from main.views import *
 def get_admin_urls(urls):
     def get_urls():
         return [
-                   path('main/bot/send/sms/', admin.site.admin_view(send_sms), name='send_sms'),
                    path('main/bot/get/token/', admin.site.admin_view(get_token), name='send_sms'),
                ] + urls
 

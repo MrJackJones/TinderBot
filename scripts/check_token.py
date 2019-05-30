@@ -22,20 +22,22 @@ logging.basicConfig(filename=log_path, level=LOGGING_LEVEL, format=LOGGING_FORMA
 class CheckTokenDaemon(Daemon):
     def run(self):
         while True:
-
-            bots = Bot.objects.filter(bot_is_active=True)
+            bots = Profile.objects.filter(bot__bot_is_active=True, token_is_active=True)
 
             for bot in bots:
                 headers = {'x-auth-token': bot.token}
                 response = requests.get(f'https://api.gotinder.com/meta', headers=headers)
-                if response.status_code != 200:
-                    msg = f'Bot {bot.id} token in disabled'
+
+                if response.status_code != 200 or response.text == 'Unauthorized':
+                    msg = f'Profile {bot.id} token in disabled'
+                    print(msg)
                     logging.error(msg)
                     bot.token_is_active = False
-                    bot.bot_is_active = False
                     bot.save()
 
-                sleep(120)
+                print(f'Profile {bot.id} is OK')
+
+                sleep(60)
 
 
 if __name__ == '__main__':

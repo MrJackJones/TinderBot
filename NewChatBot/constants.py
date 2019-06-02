@@ -16,10 +16,7 @@ LOGGING_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
 
 SMS_SERVICE_API_KEY = ''
 
-API_TOKEN_DIALOGFLOW = ''
-PROJECT_ID_DIALOGFLOW = ''
-
-GOOGLE_AUTH = {}
+DIALOGFLOW_PROJECT_ID=''
 
 COUNTRY_ALL = {
     ("random", "Random"),

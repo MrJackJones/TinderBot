@@ -19,8 +19,9 @@ def get_proxy(proxy_list):
             }
 
             checked_proxy = False
+            repeat = 0
 
-            while not checked_proxy:
+            while not checked_proxy and repeat < 15:
 
                 print(f'Start Check Proxy: {proxies}')
 
@@ -44,6 +45,7 @@ def get_proxy(proxy_list):
                     continue
 
                 checked_proxy = True
+                repeat += 1
 
             return proxies
 

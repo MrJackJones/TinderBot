@@ -76,6 +76,7 @@ class LikesProfile(models.Model):
     photo = models.CharField(max_length=255)
     matches = models.BooleanField(default=False)
     messaging = models.BooleanField(default=False)
+    messages = models.TextField('Messages', null=True, blank=True)
 
     def photo_tag(self):
         return mark_safe(f'<img src="{self.photo}" width="150" height="170"  />')

@@ -71,9 +71,9 @@ class Profile(models.Model):
 
 class LikesProfile(models.Model):
     likes_profile = models.ForeignKey(Profile, related_name='Bot', on_delete=models.CASCADE)
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, null=True, blank=True)
     profile_id = models.CharField(max_length=255)
-    photo = models.CharField(max_length=255)
+    photo = models.CharField(max_length=255, null=True, blank=True)
     matches = models.BooleanField(default=False)
     messaging = models.BooleanField(default=False)
     messages = models.TextField('Messages', null=True, blank=True)
@@ -85,7 +85,7 @@ class LikesProfile(models.Model):
     photo_tag.allow_tags = True
 
     def __str__(self):
-        return self.name
+        return self.name if self.name else str(self.pk)
 
 
 def bot_post_save(sender, instance, created, **kwargs):

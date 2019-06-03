@@ -51,8 +51,8 @@ class PhoneBlackListAdmin(admin.ModelAdmin):
 
 @admin.register(LikesProfile)
 class LikesProfileAdmin(admin.ModelAdmin):
-    list_display = ('name', 'likes_profile', 'photo_tag')
-    list_filter = ['likes_profile']
+    list_display = ('name', 'likes_profile', 'photo_tag', 'matches', 'messaging')
+    list_filter = ['likes_profile', 'matches', 'messaging']
     readonly_fields = ('profile_id',)
 
 

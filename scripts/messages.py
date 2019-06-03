@@ -57,7 +57,7 @@ class MessagesDaemon(Daemon):
 
                 matches = requests.get('https://api.gotinder.com/v2/matches?count=60&locale=ru',
                                        headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
-                print(matches.text)
+
                 response_json = json.loads(matches.text.encode('utf-8'))
 
                 userId_response = requests.get('https://api.gotinder.com/meta',
@@ -65,18 +65,22 @@ class MessagesDaemon(Daemon):
                 userId_json = json.loads(userId_response.text.encode('utf-8'))
                 userId = str(userId_json['user']['_id'])
 
-                likes_profile = LikesProfile.objects.filter(likes_profile=profile, profile_id=userId).first()
-                if not likes_profile:
-                    logging.error('No likes profile')
-                    pass
-                likes_profile.matches = True
-                likes_profile.save()
+                likes_profile, created = LikesProfile.objects.get_or_create(likes_profile=profile, profile_id=userId)
 
                 for data in range(len(response_json['data']['matches'])):
                     matchId = str(response_json['data']['matches'][data]['_id'])
                     user_name = str(response_json['data']['matches'][data]['person']['name'])
+                    photo = str(response_json['data']['matches'][data]['person']['name'])
+
+                    if created:
+                        likes_profile.photo = photo
+
+                    likes_profile.name = user_name
+                    likes_profile.matches = True
+                    likes_profile.save()
+
                     if len(response_json['data']['matches'][data]['messages']) == 0:
-                        post_data = {"matchId": matchId, "message": "Hello!",
+                        post_data = {"matchId": matchId, "message": "Привет!)",
                                      "userId": userId}
                         requests.post('https://api.gotinder.com/user/matches/%s?locale=ru' % matchId, data=post_data,
                                      headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
@@ -84,20 +88,19 @@ class MessagesDaemon(Daemon):
                         if str(response_json['data']['matches'][data]['messages'][0]['from']) != userId:
                             message = str(response_json['data']['matches'][data]['messages'][0]['message'])
 
-                            result = self.detect_intent_texts(DIALOGFLOW_PROJECT_ID, "unique", message, ''
-                                                                                                        '')
+                            result = self.detect_intent_texts(DIALOGFLOW_PROJECT_ID, "unique", message, 'en')
 
                             post_data = {"matchId": matchId, "message": result, "userId": userId}
                             requests.post('https://api.gotinder.com/user/matches/%s?locale=ru' % matchId,data=post_data,
                                           headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
 
                             logs = likes_profile.messages
-                            likes_profile.messages = logs + f'{timezone.now()}: {user_name} - {message}\n'
+                            likes_profile.messages = logs if logs else '' + f'{timezone.now()}: {user_name} - {message}\n'
                             likes_profile.save()
 
                             print(f'User: {user_name} \nQuestions: {data} \n Answer: {result}')
 
-            sleep(20)
+                sleep(20)
 
 
 if __name__ == '__main__':

@@ -15,65 +15,55 @@ import logging
 logger = logging.getLogger('views')
 
 
-def _get_phone_number(profile: Profile, proxies: dict, random_county: int):
+def _get_phone_number(profile: Profile, proxies: dict):
     print('Start Get Number')
 
-    get_number_url = f'https://onlinesim.ru/api/getNum.php?apikey={SMS_SERVICE_API_KEY}&service=tinder&country={random_county}'
+    headers = {'Authorization': f"Bearer {SMS_SERVICE_API_KEY}"}
 
     try:
-        response = requests.get(get_number_url, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
+        response = requests.get(f'http://smsboost.ru/api/v1/platform/phone/tinder',
+                                headers=headers, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
     except Exception as e:
+        return
+
+    if response.status_code != 200:
+        msg = f'error get number for profile: {profile.pk}'
+        print(msg)
+        logger.error(msg)
         return
 
     print(response.text)
 
     data = json.loads(response.text.encode('utf-8'))
 
-    tzid = data['tzid']
+    phone_number = data['message']
 
-    monitoring_number_url = f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=tinder'
-
-    try:
-        response = requests.get(monitoring_number_url, proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
-    except Exception as e:
-        return
-
-    print(response.text)
-
-    data = json.loads(response.text.encode('utf-8'))
-
-    for i in data:
-        if i['tzid'] == tzid and i.get('number') and not PhoneBlackList.objects.filter(
-                phone_number=i['number']).exists():
-            phone_number = i['number']
-            tzid = i['tzid']
-
-            PhoneBlackList.objects.create(phone_number=phone_number)
-
-            return phone_number, tzid
-
-    return
+    return phone_number
 
 
-def _get_otp_code(tzid: int, proxies: dict):
+def _get_otp_code(phone_number: int, proxies: dict):
     print('Start Get OTP')
+
+    headers = {'Authorization': f"Bearer {SMS_SERVICE_API_KEY}"}
     try:
-        response = requests.get(
-            f'https://onlinesim.ru/api/getState.php?apikey={SMS_SERVICE_API_KEY}&tzid={tzid}&service=tinder',
-            proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT
-        )
+        response = requests.get(f'http://smsboost.ru/api/v1/platform/code/{phone_number}', headers=headers,
+            proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
     except Exception as e:
+        return
+
+    if response.status_code != 200:
+        msg = f'Error get OTP: {response.text}'
+        print(msg)
+        logger.error(msg)
         return
 
     print(response.text)
 
     data = json.loads(response.text.encode('utf-8'))
-    for i in data:
-        if i['tzid'] == tzid:
-            if i.get('msg'):
-                otp_code = i['msg']
-                return otp_code
-    return
+
+    otp = data['message']
+
+    return otp
 
 
 @csrf_exempt
@@ -97,8 +87,6 @@ def get_token(request):
 
     profiles = Profile.objects.filter(bot=bot)
 
-    random_county = bot.phone_country
-
     for profile in profiles:
         if profile.token_is_active:
             continue
@@ -106,7 +94,6 @@ def get_token(request):
         proxies = None
         f = None
         otp_code = None
-        tzid = None
 
         if bot.proxy:
             proxies = get_proxy(bot.proxy.proxy_list)
@@ -117,7 +104,7 @@ def get_token(request):
 
         if not phone_number:
             while not phone_number:
-                phone_number, tzid = _get_phone_number(profile, proxies, random_county)
+                phone_number = _get_phone_number(profile, proxies)
 
         data = {
             "phone_number": phone_number
@@ -137,9 +124,9 @@ def get_token(request):
             continue
 
         repeat = 0
-        while not otp_code and repeat < 5:
+        while not otp_code and repeat < 10:
             sleep(20)
-            otp_code = _get_otp_code(tzid, proxies)
+            otp_code = _get_otp_code(phone_number, proxies)
             repeat += 1
 
         url = f'https://api.gotinder.com/v2/auth/sms/validate?auth_type=sms&locale=ru'

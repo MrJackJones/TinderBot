@@ -38,7 +38,6 @@ class Bot(models.Model):
     age_from = models.IntegerField(default=18, blank=True, null=True)
     age_to = models.IntegerField(default=18, blank=True, null=True)
     country = models.CharField('Country', choices=COUNTRY_ALL, default='random', max_length=255)
-    phone_country = models.PositiveSmallIntegerField('Phone Country', choices=PHONE_COUNTRY, default=7, blank=True, null=True)
     proxy = models.ForeignKey(ProxyList, related_name='proxy', on_delete=models.CASCADE, blank=True, null=True)
     biography = models.FileField(upload_to=bio_path)
     photo_folder_list = models.CharField(max_length=1000)
@@ -70,7 +69,7 @@ class Profile(models.Model):
 
 
 class LikesProfile(models.Model):
-    likes_profile = models.ForeignKey(Profile, related_name='Bot', on_delete=models.CASCADE)
+    likes_profile = models.ForeignKey(Profile, related_name='Bot', on_delete=models.SET_NULL, null=True)
     name = models.CharField(max_length=255, null=True, blank=True)
     profile_id = models.CharField(max_length=255)
     photo = models.CharField(max_length=255, null=True, blank=True)

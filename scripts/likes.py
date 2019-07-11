@@ -28,8 +28,9 @@ class LikesDaemon(Daemon):
             profiles = Profile.objects.filter(bot__bot_is_active=True, token_is_active=True, likes_limit=False)
 
             if not profiles:
-                print('No active profile')
-                exit()
+                logging.error('No active profile')
+                sleep(60)
+                continue
 
             for profile in profiles:
                 if profile.bot.proxy:

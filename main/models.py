@@ -1,3 +1,4 @@
+import os
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import User
@@ -5,12 +6,10 @@ from django.utils import timezone
 from django.utils.safestring import mark_safe
 from NewChatBot.constants import *
 from django.db.models.signals import post_save
-import requests
-import json
 from NewChatBot.constants import *
 from random import randint, choice
 from django.conf import settings
-from main.utils import get_proxy
+from main.utils import get_proxy, get_user_data
 
 
 class ProxyList(models.Model):
@@ -37,12 +36,18 @@ class Bot(models.Model):
     gender = models.PositiveSmallIntegerField('Gender', choices=ALL_GENDER, default=male)
     age_from = models.IntegerField(default=18, blank=True, null=True)
     age_to = models.IntegerField(default=18, blank=True, null=True)
+    interest_age_from = models.IntegerField(default=18, blank=True, null=True)
+    interest_age_to = models.IntegerField(default=18, blank=True, null=True)
     country = models.CharField('Country', choices=COUNTRY_ALL, default='random', max_length=255)
     proxy = models.ForeignKey(ProxyList, related_name='proxy', on_delete=models.CASCADE, blank=True, null=True)
     biography = models.FileField(upload_to=bio_path)
     photo_folder_list = models.CharField(max_length=1000)
     unique_names = models.BooleanField(default=False)
     bot_is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Bot creator"
+        verbose_name_plural = "Bot creator"
 
     def __str__(self):
         return f"{self.pk}"
@@ -64,6 +69,10 @@ class Profile(models.Model):
     token_is_active = models.BooleanField(default=False)
     likes_limit = models.BooleanField(default=False)
 
+    class Meta:
+        verbose_name = "Bot profile"
+        verbose_name_plural = "Bot profile"
+
     def __str__(self):
         return f"{self.name} - {timezone.localtime(self.birth_date).strftime('%Y-%m-%d')} - {self.get_gender_display()}"
 
@@ -83,6 +92,10 @@ class LikesProfile(models.Model):
     photo_tag.short_description = 'Image'
     photo_tag.allow_tags = True
 
+    class Meta:
+        verbose_name = "Bot liker"
+        verbose_name_plural = "Bot liker"
+
     def __str__(self):
         return self.name if self.name else str(self.pk)
 
@@ -93,7 +106,8 @@ def bot_post_save(sender, instance, created, **kwargs):
     if created:
         proxies = None
         biography = instance.biography
-        photo_list = instance.photo_folder_list.split(',')
+        target_folder = f'{media_root}/images/{instance.photo_folder_list}'
+        photo_list = os.listdir(target_folder)
 
         with open(f'{media_root}/{biography}') as f:
             biography_list = list(f.read().splitlines())
@@ -105,41 +119,13 @@ def bot_post_save(sender, instance, created, **kwargs):
 
             unique_names = instance.unique_names
             profile: Profile = Profile(bot=instance)
-            try:
-                response = requests.get(
-                    f'https://api.namefake.com/{instance.country}/{instance.get_gender_display().lower()}/',
-                    timeout=REQUESTS_TIMEOUT, proxies=proxies, verify=False)
-            except Exception as e:
-                continue
 
-            print(response.text)
-            data = json.loads(response.text.encode('utf-8'))
-
-            name = data['name'].split(' ')[0]
-            email = f"{data['email_u']}@{data['email_d']}"
-            latitude = data['latitude']
-            longitude = data['longitude']
-
-            birth_date = timezone.datetime.now()-timezone.timedelta(days=randint(instance.age_from, instance.age_to)*365)
+            name, email, latitude, longitude, birth_date = get_user_data(instance, proxies)
 
             while unique_names:
-                if Profile.objects.filter(name=name).exists() \
-                        or name in ['Mr', 'Mrs', 'Miss', 'Ms', 'Mx', 'Sir', 'dr', 'Dr', 'Prof.']:
-                    try:
-                        response = requests.get(
-                            f'https://api.namefake.com/{instance.country}/{instance.get_gender_display().lower()}/',
-                            proxies=proxies, verify=False, timeout=REQUESTS_TIMEOUT)
-                    except Exception as e:
-                        continue
-
-                    data = json.loads(response.text.encode('utf-8'))
+                if Profile.objects.filter(name=name).exists():
+                    name, email, latitude, longitude, birth_date = get_user_data(instance, proxies)
                 else:
-                    name = data['name'].split(' ')[0]
-                    email = f"{data['email_u']}@{data['email_d']}"
-                    latitude = data['latitude']
-                    longitude = data['longitude']
-                    birth_date = timezone.datetime.now() - timezone.timedelta(
-                        days=randint(instance.age_from, instance.age_to) * 365)
                     unique_names = False
 
             profile.name = name
@@ -155,7 +141,7 @@ def bot_post_save(sender, instance, created, **kwargs):
                 profile.biography = bio
 
             photo = choice(photo_list)
-            profile.photo = f'{media_root}/images/{photo}'
+            profile.photo = f'{media_root}/images/{instance.photo_folder_list}/{photo}'
 
             profile.save()
 

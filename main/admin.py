@@ -3,11 +3,35 @@ from .models import *
 from django.contrib.auth.models import User, Group
 from django.template.loader import render_to_string
 from django.utils.html import format_html, format_html_join
+from django.forms import ModelForm, Select, CharField
+import os
+import sys
+
+
+class FolderListDropDown(Select):
+    def __init__(self, attrs=None):
+        current_path = os.path.dirname(os.path.realpath(__file__))
+        target_folder = f'{current_path}/../media/images/'
+        dir_contents = os.listdir(target_folder)
+        directories = []
+
+        for item in dir_contents:
+            if os.path.isdir(''.join((target_folder,item,))):
+              directories.append((item, item),)
+
+        folder_list = tuple(directories)
+        super(FolderListDropDown, self).__init__(attrs=attrs, choices=folder_list)
+
+
+class photoForm(ModelForm):
+    photo_folder_list = CharField(widget=FolderListDropDown())
 
 
 @admin.register(Bot)
 class BotAdmin(admin.ModelAdmin):
     list_display = ('country', 'gender', 'ages', 'proxy', 'bot_active', 'auth')
+
+    form = photoForm
 
     def ages(self, obj):
         return format_html(f'From {obj.age_from} to {obj.age_to}')
